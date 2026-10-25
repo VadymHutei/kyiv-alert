@@ -43,7 +43,7 @@ class Service:
             logger.debug("Snapshot checked: Kyiv level=%s", snapshot.level)
         event = self.store.pending()
         if event is not None and now >= self.next_delivery_at:
-            text = render_notification(event, now, self.config.notification_max_age)
+            text = render_notification(event)
             if self.config.demo_mode:
                 text = "[ТЕСТ — симульовані дані]\n" + text
             try:

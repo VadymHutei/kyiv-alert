@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -94,18 +95,18 @@ class ServiceTests(unittest.TestCase):
         for time, level in enumerate(("none", "yellow", "red", "red", "yellow", "none")):
             self.tick(level, 100 + time)
         self.assertEqual(len(self.notifier.messages), 2)
-        self.assertIn("червоний", self.notifier.messages[0][1])
-        self.assertIn("Жовтий рівень залишається", self.notifier.messages[1][1])
+        self.assertTrue(self.notifier.messages[0][1].startswith("🔴 Тривога"))
+        self.assertTrue(self.notifier.messages[1][1].startswith("🟡 Відбій червоного рівня"))
 
     def test_red_to_absent(self):
         self.tick("red", 100)
         self.tick("none", 110)
         self.assertEqual(len(self.notifier.messages), 2)
-        self.assertIn("знято", self.notifier.messages[1][1])
+        self.assertTrue(self.notifier.messages[1][1].startswith("🟢 Відбій"))
 
-    def test_first_start_during_red_uses_active_wording(self):
+    def test_first_start_during_red_does_not_invent_start_time(self):
         self.tick("red", 100)
-        self.assertIn("діє", self.notifier.messages[0][1])
+        self.assertIn("Початок: невідомо", self.notifier.messages[0][1])
 
     def test_restart_does_not_repeat_red(self):
         self.tick("red", 100)
@@ -142,7 +143,7 @@ class ServiceTests(unittest.TestCase):
         self.notifier.fail = False
         self.tick("none", 110)
         self.assertEqual(len(self.notifier.messages), 1)
-        self.assertIn("знято", self.notifier.messages[0][1])
+        self.assertTrue(self.notifier.messages[0][1].startswith("🟢 Відбій"))
         statuses = [r[0] for r in self.store.connection.execute("SELECT status FROM outbox ORDER BY id")]
         self.assertEqual(statuses, ["superseded", "sent"])
 
@@ -151,7 +152,8 @@ class ServiceTests(unittest.TestCase):
         self.tick(TimeoutError(), 200)
         self.tick("red", 500)
         self.assertEqual(len(self.notifier.messages), 2)
-        self.assertIn("Поточний стан", self.notifier.messages[-1][1])
+        self.assertTrue(self.notifier.messages[-1][1].startswith("🔴 Тривога"))
+        self.assertIn("Початок: невідомо", self.notifier.messages[-1][1])
 
     def test_delivery_backoff(self):
         self.notifier.fail = True
@@ -169,10 +171,16 @@ class ServiceTests(unittest.TestCase):
         self.tick(TimeoutError(), 240)
         self.assertFalse(is_healthy(self.config, 240))
 
-    def test_old_pending_message_uses_current_wording(self):
-        self.store.observe(Snapshot("red"), 100)
-        text = render_notification(self.store.pending(), 500, 300)
-        self.assertIn("Поточний стан", text)
+    def test_delayed_end_keeps_detection_time_instead_of_delivery_time(self):
+        self.tick("red", 100)
+        self.notifier.fail = True
+        self.tick("none", 110)
+        pending = self.store.pending()
+        expected = render_notification(pending)
+        self.notifier.fail = False
+        self.tick("none", 200)
+        self.assertEqual(self.notifier.messages[-1][1], expected)
+        self.assertIsNone(self.store.pending())
 
     def test_simulated_notifications_are_explicitly_marked(self):
         self.service.config = replace(self.config, demo_mode=True)
@@ -186,7 +194,8 @@ class ServiceTests(unittest.TestCase):
         self.notifier.fail = False
         self.tick("none", 120)
         self.assertEqual(len(self.notifier.messages), 2)
-        self.assertNotIn("Жовтий рівень залишається", self.notifier.messages[-1][1])
+        self.assertTrue(self.notifier.messages[-1][1].startswith("🟢 Відбій"))
+        self.assertIn("Закінчення: невідомо", self.notifier.messages[-1][1])
 
     def test_enqueue_failure_rolls_back_state(self):
         self.store.observe(Snapshot("none"), 100)
@@ -199,6 +208,34 @@ class ServiceTests(unittest.TestCase):
         state = self.store.connection.execute("SELECT level, observed_at FROM state").fetchone()
         self.assertEqual(tuple(state), ("none", 100))
         self.assertIsNone(self.store.pending())
+
+
+class MessageTimeTests(unittest.TestCase):
+    def test_source_start_time_and_two_line_format(self):
+        event = {"kind": "active", "level": "red", "since": "2026-10-25T12:00:00Z",
+                 "created_at": datetime(2026, 10, 25, 14, tzinfo=timezone.utc).timestamp()}
+        with patch("kyiv_alert.notifier.ZoneInfo", return_value=timezone(timedelta(hours=2))):
+            text = render_notification(event)
+        self.assertEqual(text, "🔴 Тривога в Києві\nПочаток: 25.10.2026 14:00")
+
+    def test_end_uses_observed_time_not_yellow_since(self):
+        event = {"kind": "ended", "level": "yellow", "since": "2026-10-25T01:00:00Z",
+                 "created_at": datetime(2026, 10, 25, 12, 30, tzinfo=timezone.utc).timestamp()}
+        with patch("kyiv_alert.notifier.ZoneInfo", return_value=timezone(timedelta(hours=2))):
+            text = render_notification(event)
+        self.assertEqual(text, "🟡 Відбій червоного рівня в Києві\nЗакінчення: ≈ 25.10.2026 14:30")
+
+    def test_utc_fallback_is_labelled(self):
+        event = {"kind": "started", "level": "red", "since": "2026-10-25T12:00:00Z",
+                 "created_at": 100}
+        with patch("kyiv_alert.notifier.ZoneInfo", side_effect=KeyError):
+            text = render_notification(event)
+        self.assertEqual(text, "🔴 Тривога в Києві\nПочаток: 25.10.2026 12:00 UTC")
+
+    def test_recovery_does_not_invent_end_time(self):
+        event = {"kind": "sync", "level": "none", "since": None, "created_at": 100}
+        self.assertEqual(render_notification(event),
+                         "🟢 Відбій червоного рівня в Києві\nЗакінчення: невідомо")
 
 
 class ConsoleTests(unittest.TestCase):

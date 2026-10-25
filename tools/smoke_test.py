@@ -88,7 +88,8 @@ def main():
         # Restart logs include old output, but unchanged states must not add events.
         assert logs.count("NOTIFICATION ") == 4, logs
         assert "[ТЕСТ" in logs, logs
-        assert "Жовтий рівень залишається" in logs, logs
+        assert "🟡 Відбій червоного рівня" in logs, logs
+        assert "🟢 Відбій червоного рівня" in logs, logs
         compose("exec", "-T", "alert", "python", "-m", "kyiv_alert", "--healthcheck")
         print("PASS red removal, four console notifications, healthy service", flush=True)
     except BaseException:

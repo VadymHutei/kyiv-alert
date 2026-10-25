@@ -116,37 +116,35 @@ def create_notifier(config):
     return ConsoleNotifier()
 
 
-def render_notification(event, now, max_age):
-    if event["kind"] == "sync" or now - event["created_at"] > max_age:
-        status = {
-            "red": "У Києві діє червоний рівень загрози.",
-            "yellow": "У Києві немає червоного рівня. Жовтий рівень залишається.",
-            "none": "У Києві немає червоного рівня загрози за даними джерела.",
-        }[event["level"]]
-        headline = "Поточний стан після затримки доставки: " + status
-    elif event["kind"] == "active":
-        headline = "🔴 У Києві діє червоний рівень загрози."
-    elif event["kind"] == "started":
-        headline = "🔴 У Києві виявлено червоний рівень загрози."
-    else:
-        headline = "Червоний рівень загрози в Києві знято за даними джерела."
-        if event["level"] == "yellow":
-            headline += " Жовтий рівень залишається."
-
+def render_notification(event):
     # Windows may lack the IANA database; Docker installs OS tzdata.
     try:
         local_zone = ZoneInfo("Europe/Kyiv")
-        zone_label = "за Києвом"
+        zone_label = ""
     except KeyError:
         local_zone = timezone.utc
-        zone_label = "UTC"
-    checked_at = datetime.fromtimestamp(now, local_zone).strftime("%d.%m.%Y %H:%M:%S")
-    lines = [headline, f"Перевірено: {checked_at} ({zone_label})."]
-    if event["level"] == "red" and event["since"]:
-        since = datetime.fromisoformat(event["since"]).astimezone(local_zone)
-        lines.append(f"Початок за даними джерела: {since:%d.%m.%Y %H:%M:%S} ({zone_label}).")
-    lines.extend([
-        "Джерело: NEPTUN — https://neptun.in.ua/",
-        "Інформаційний сервіс. Орієнтуйтеся на офіційні сигнали повітряної тривоги.",
-    ])
-    return "\n".join(lines)
+        zone_label = " UTC"
+
+    approximate = False
+    timestamp = None
+    if event["level"] == "red":
+        headline = "🔴 Тривога в Києві"
+        label = "Початок"
+        if event["since"]:
+            timestamp = datetime.fromisoformat(event["since"]).astimezone(local_zone)
+        elif event["kind"] == "started":
+            timestamp = datetime.fromtimestamp(event["created_at"], local_zone)
+            approximate = True
+    else:
+        symbol = "🟡" if event["level"] == "yellow" else "🟢"
+        headline = f"{symbol} Відбій червоного рівня в Києві"
+        label = "Закінчення"
+        if event["kind"] == "ended":
+            # The snapshot has no end timestamp: use detection, never delivery time.
+            timestamp = datetime.fromtimestamp(event["created_at"], local_zone)
+            approximate = True
+
+    time_text = f"{timestamp:%d.%m.%Y %H:%M}{zone_label}" if timestamp else "невідомо"
+    if approximate:
+        time_text = "≈ " + time_text
+    return f"{headline}\n{label}: {time_text}"
