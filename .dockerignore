@@ -1,7 +1,20 @@
-.git
-.env
-.venv
-.idea
-**/__pycache__
-data
-*.sqlite3*
+# Only application code and test tools are available to the builder.
+**
+!Dockerfile
+!kyiv_alert/
+kyiv_alert/*
+!kyiv_alert/*.py
+!tools/
+tools/*
+!tools/*.py
+!tests/
+tests/*
+!tests/*.py
+**/.env*
+**/__pycache__/**
+**/secrets/**
+**/credentials/**
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx

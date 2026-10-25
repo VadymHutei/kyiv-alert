@@ -24,6 +24,10 @@ class Store:
                     status TEXT NOT NULL DEFAULT 'pending',
                     delivered_at REAL
                 );
+                CREATE TABLE IF NOT EXISTS delivery_retry (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    not_before REAL NOT NULL
+                );
             """)
 
     def close(self):
@@ -82,4 +86,17 @@ class Store:
             self.connection.execute(
                 "UPDATE outbox SET status = 'sent', delivered_at = ? WHERE id = ?",
                 (now, event_id),
+            )
+            self.connection.execute("DELETE FROM delivery_retry")
+
+    def retry_not_before(self):
+        row = self.connection.execute("SELECT not_before FROM delivery_retry WHERE id = 1").fetchone()
+        return row[0] if row is not None else 0
+
+    def defer_delivery(self, until):
+        with self.connection:
+            self.connection.execute(
+                """INSERT INTO delivery_retry VALUES (1, ?)
+                   ON CONFLICT(id) DO UPDATE SET not_before=excluded.not_before""",
+                (until,),
             )

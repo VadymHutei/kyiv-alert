@@ -5,6 +5,10 @@ services:
       ALERTS_URL: http://mock-api:8000/api/v1/alerts
       POLL_INTERVAL_SECONDS: '5'
       DEMO_MODE: 'true'
+      NOTIFIER: console
+      TELEGRAM_BOT_TOKEN: ''
+      TELEGRAM_CHAT_ID: ''
+      TELEGRAM_MESSAGE_THREAD_ID: ''
     volumes:
       - mock-state:/data
     depends_on:

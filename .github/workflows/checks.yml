@@ -1,0 +1,26 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check publishable files
+        run: python3 tools/check_secrets.py
+      - name: Check Git history
+        run: python3 tools/check_secrets.py --history
+      - name: Run tests
+        env:
+          NOTIFIER: console
+        run: python3 -m unittest discover -v
