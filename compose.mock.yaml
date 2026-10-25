@@ -1,0 +1,33 @@
+# Always combine with compose.yaml. Mock state is kept in a separate volume.
+services:
+  alert:
+    environment:
+      ALERTS_URL: http://mock-api:8000/api/v1/alerts
+      POLL_INTERVAL_SECONDS: '5'
+      DEMO_MODE: 'true'
+    volumes:
+      - mock-state:/data
+    depends_on:
+      mock-api:
+        condition: service_healthy
+
+  mock-api:
+    image: kyiv-alert:local
+    init: true
+    command: [python, tools/mock_api.py, serve]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, tools/mock_api.py, check]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+
+volumes:
+  mock-state:

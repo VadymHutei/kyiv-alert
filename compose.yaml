@@ -1,0 +1,35 @@
+name: kyiv-alert
+
+services:
+  alert:
+    build: .
+    image: kyiv-alert:local
+    init: true
+    restart: unless-stopped
+    environment:
+      ALERTS_URL: ${ALERTS_URL:-https://neptun.in.ua/api/v1/alerts}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-10}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-5}
+      NOTIFICATION_MAX_AGE_SECONDS: ${NOTIFICATION_MAX_AGE_SECONDS:-300}
+      HEALTH_MAX_AGE_SECONDS: ${HEALTH_MAX_AGE_SECONDS:-120}
+    volumes:
+      - state:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -m, kyiv_alert, --healthcheck]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '3'
+
+volumes:
+  state:
